@@ -1,9 +1,15 @@
 const { io } = require("socket.io-client");
+
 function connectWebSocketWithToken(token) {
-  const socket = io("http://localhost:3000");
+  console.log("socket connecting...");
+  const socket = io("http://localhost:3000", {
+    query: {
+      token: token,
+    },
+  });
 
   socket.on("connect", () => {
-    console.log(socket.id); // x8WIv7-mJelg7on_ALbx
+    console.log("socket connection established.", socket.id); // x8WIv7-mJelg7on_ALbx
   });
   socket.on("disconnect", () => {
     console.log(socket.id); // undefined
@@ -12,6 +18,15 @@ function connectWebSocketWithToken(token) {
 }
 
 function initializeWebRTC(receiverId) {
+  console.log("initializing RTCPeerConnection");
+  global.io.emit(
+    "ice-candidate",
+    JSON.stringify({
+      type: "ice-candidate",
+      candidate: "testFlow",
+      receiverId: receiverId, // Include the receiver's ID
+    })
+  );
   let localConnection = new RTCPeerConnection();
 
   // Send any ICE candidates to the server
@@ -32,7 +47,7 @@ function initializeWebRTC(receiverId) {
   localConnection.onnegotiationneeded = async () => {
     let offer = await localConnection.createOffer();
     await localConnection.setLocalDescription(offer);
-    global.ws.send(
+    global.io.send(
       JSON.stringify({
         type: "offer",
         offer: offer,
@@ -42,7 +57,7 @@ function initializeWebRTC(receiverId) {
   };
 
   // Handle messages from the WebSocket server
-  global.ws.onmessage = async (message) => {
+  global.io.onmessage = async (message) => {
     let data = JSON.parse(message.data);
 
     if (data.type === "offer") {
@@ -51,7 +66,7 @@ function initializeWebRTC(receiverId) {
       );
       let answer = await localConnection.createAnswer();
       await localConnection.setLocalDescription(answer);
-      global.ws.send(
+      global.io.send(
         JSON.stringify({
           type: "answer",
           answer: answer,

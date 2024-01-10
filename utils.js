@@ -8,8 +8,8 @@ function verifySignature(dataString, signature, publicKey) {
 
 const jwt = require("jsonwebtoken");
 
-const JWT_SECRET = "your_jwt_secret"; // Replace with your actual secret
-
+const JWT_SECRET = "JWT_SECRET";
+const REFRESH_SECRET = "REFRESH_SECRET";
 function verifyJWT(req, res, next) {
   const token = req.headers.authorization?.split(" ")[1];
 
@@ -26,7 +26,16 @@ function verifyJWT(req, res, next) {
   }
 }
 
-const REFRESH_SECRET = "your_refresh_secret"; // Replace with your actual secret
+function isVerifyToken(token) {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    console.log("isVerifyToken", JSON.stringify(decoded));
+    return true;
+  } catch (ex) {
+    console.log("isVerifyToken", JSON.stringify(ex));
+    return false;
+  }
+}
 
 function verifyRefreshToken(req, res, next) {
   const token = req.body.refreshToken;
@@ -69,4 +78,5 @@ module.exports = {
   verifySignature,
   isClientAllowed,
   getClientConnectionInfo,
+  isVerifyToken,
 };

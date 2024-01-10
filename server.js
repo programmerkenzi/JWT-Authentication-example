@@ -1,7 +1,6 @@
 const express = require("express");
-const http = require("http");
 const {
-  verifyJWT,
+  isVerifyToken,
   verifyRefreshToken,
   verifySignature,
   isClientAllowed,
@@ -17,6 +16,7 @@ const publicKeysDB = {
 
 const app = require("express")();
 app.use(express.json());
+app.use(cors());
 const server = require("http").createServer(app);
 const io = require("socket.io")(server);
 const port = process.env.PORT || 3000;
@@ -25,53 +25,15 @@ server.listen(port, function () {
   console.log(`Listening on port ${port}`);
 });
 
-// server-side
-io.on("connection", (socket) => {
-  console.log("websocket server is running");
+io.use((socket, next) => {
+  const token = socket.handshake.query.token;
+  console.log(`Handshake`, isVerifyToken(token));
 
-  socket.on("upgrade", (request, socket, head) => {
-    // Extract the token from the request
-    const token = request.headers["sec-websocket-protocol"];
-    console.log("wss auth", token);
-    const isVerify = verifyJWT(token);
-    // Extract token from request headers and verify
-    if (isVerify) {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit("connection", ws, request);
-
-        // When a new WebSocket connection is established
-        clientConnections.set(isVerify.clientId, ws);
-      });
-    } else {
-      socket.destroy(); // Close the connection if the token is invalid
-    }
-  });
-  socket.on("ice-candidate", async (message) => {
-    const data = JSON.parse(message);
-
-    // Assume `data` contains `senderId` and `receiverId`
-    const { senderId, receiverId } = data;
-
-    // Check if the sender is allowed to connect with the receiver
-    const isAllowed = await isClientAllowed(senderId, receiverId);
-    if (!isAllowed) {
-      console.log(
-        `Connection from ${senderId} to ${receiverId} is not allowed.`
-      );
-      return;
-    }
-
-    // Find the WebSocket connection of the receiver
-    const receiverWs = clientConnections.get(receiverId);
-    if (receiverWs) {
-      // Relay the ICE candidate to the receiver
-      receiverWs.send(
-        JSON.stringify({ type: "ice-candidate", candidate: data.candidate })
-      );
-    }
-
-    // Handle other message types...
-  });
+  if (isVerifyToken(token)) {
+    console.log("Token verified");
+    return next();
+  }
+  return next(new Error("Authentication error"));
 });
 
 app.post("/create-client", (req, res) => {
@@ -103,11 +65,9 @@ app.post("/auth", (req, res) => {
     const accessToken = jwt.sign({ clientId }, "JWT_SECRET", {
       expiresIn: "15m",
     });
-    console.log("accessToken ", accessToken);
     const refreshToken = jwt.sign({ clientId }, "REFRESH_SECRET", {
       expiresIn: "7d",
     });
-    console.log("refreshToken ", refreshToken);
 
     res.json({ accessToken, refreshToken });
   } else {
@@ -133,6 +93,35 @@ app.post("/refresh-token", (req, res) => {
   }
 });
 
-io.on("connection", () => {
-  /* … */
+const clientConnections = new Map();
+
+io.on("connection", (socket) => {
+  console.log("websocket server is running");
+
+  socket.on("ice-candidate", async (message) => {
+    const data = JSON.parse(message);
+    console.log("ICE received", data);
+    // Assume `data` contains `senderId` and `receiverId`
+    const { senderId, receiverId } = data;
+
+    // Check if the sender is allowed to connect with the receiver
+    const isAllowed = await isClientAllowed(senderId, receiverId);
+    if (!isAllowed) {
+      console.log(
+        `Connection from ${senderId} to ${receiverId} is not allowed.`
+      );
+      return;
+    }
+
+    // Find the WebSocket connection of the receiver
+    const receiverWs = clientConnections.get(receiverId);
+    if (receiverWs) {
+      // Relay the ICE candidate to the receiver
+      receiverWs.send(
+        JSON.stringify({ type: "ice-candidate", candidate: data.candidate })
+      );
+    }
+
+    // Handle other message types...
+  });
 });

@@ -15,7 +15,7 @@ const data = {
 const dataString = JSON.stringify(data); // Convert data object to string
 const signature = privateKey.sign(dataString, "base64", "utf8");
 
-async function getTokens() {
+async function testFlow() {
   axios
     .post("http://localhost:3000/auth", {
       clientId, // Send clientId along with the signature
@@ -24,10 +24,11 @@ async function getTokens() {
     .then((response) => {
       const { accessToken, refreshToken } = response.data;
       if (accessToken) connectWebSocketWithToken(accessToken);
+      if (global.io) initializeWebRTC("testUserId");
     })
     .catch((error) => {
       console.error("Token request failed:", error.message);
     });
 }
 
-module.exports = { getTokens };
+module.exports = { testFlow };
