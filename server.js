@@ -1,109 +1,138 @@
 const express = require("express");
-const jwt = require("jsonwebtoken");
+const http = require("http");
+const {
+  verifyJWT,
+  verifyRefreshToken,
+  verifySignature,
+  isClientAllowed,
+} = require("./utils");
 const cors = require("cors");
-
-const app = express();
-app.use(express.json()); // Middleware to parse JSON bodies
-app.use(cors());
-
-const { v4: uuidv4 } = require("uuid");
-const { generateKeyPair } = require("crypto");
+const NodeRSA = require("node-rsa");
+const jwt = require("jsonwebtoken");
 
 const publicKeysDB = {
-  "639cb4ba-7816-484c-84ef-491850a1010f":
-    "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnhxt8r2BVs5IwKRVsYoV\nGFwaMoo2RADvsaUv2mP2qkQyFLkHYDbCsZrxn91xjbmUN7ePZU/bEH76y5pZIrjM\nLj8yExfQIqNr5TMiwXyJJvFmsc+hKGEQXoBIfVS+eDDgiVwZAf3YTtOLMKbQ9Wt1\nUhwQd+TspHsPdUlEJN+xEJrm7fkfSv7sogxjxmg2L5QOSsrpZ6ykei1swpAbeq3M\nmpItasy8gJZnZ0Vuw2EE9GEUwApxUH+ZmWL9tPkoaiuDMeLLqX+VCDYxf9TSGwwV\nnHFSA5pcOEYs3YNzkzD65BT9CYfmY42m62oUDChoxslboQ1IR0qliXbnZ3/mxHp7\nJwIDAQAB\n-----END PUBLIC KEY-----\n",
+  "0094f56d15c36a1731e44002b790d5e0":
+    "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlPVtFcNqFzHkQAK3kNXg\n71v7f9m1ftnSNsNgqHNXBZbyYishexNYgIrDl9xlgvph9a45JmFD4JZD8AcYtap7\nf58MfrfhX5Cvw/w0lOcphM2K33IrqQtUBh9pvWAx+c5LPuL4gXd8oYV5MvAjnEsn\n+5SHucMTgBoVaZhE6TE5AlRcRzQdFIdutqlf6/SznWWty4DeBDUe0kk5Fhvn+uGb\nISMymM+rmb9Qd8q1Nlumzg2aDmZzLSaOzyAkR9rWyo6UO3FjgIYv9TpmBufN/ERU\n+SRejjSgIvMwoIFN7SRB/up0IHh/P4XM89THQ+NJpE4UfiFSVBP2vt/IMKZfKFUf\nNQIDAQAB\n-----END PUBLIC KEY-----",
 };
 
-// Simulated JWK Set store
-let jwkSet = {
-  keys: [], // This will store our public keys in JWK format
-};
+const app = require("express")();
+app.use(express.json());
+const server = require("http").createServer(app);
+const io = require("socket.io")(server);
+const port = process.env.PORT || 3000;
 
-// Middleware to authenticate and verify JWT
-const verifyJWT = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).send("Unauthorized: No token provided");
-  }
+server.listen(port, function () {
+  console.log(`Listening on port ${port}`);
+});
 
-  const token = authHeader.split(" ")[1];
-  const decodedToken = jwt.decode(token, { complete: true });
-  if (!decodedToken) {
-    return res.status(401).send("Unauthorized: Invalid token");
-  }
-  const clientId = decodedToken.payload.sub; // Custom claim to identify client
-  const publicKey = publicKeysDB[clientId];
-  if (!publicKey) {
-    return res
-      .status(401)
-      .send("Unauthorized: Invalid client ID or public key not found");
-  }
+// server-side
+io.on("connection", (socket) => {
+  console.log("websocket server is running");
 
-  try {
-    jwt.verify(token, publicKey, { algorithms: ["RS256"] }); // Verify token
-    next(); // Proceed to the next middleware/route handler
-  } catch (error) {
-    return res.status(401).send(`Unauthorized: ${error.message}`);
-  }
-};
+  socket.on("upgrade", (request, socket, head) => {
+    // Extract the token from the request
+    const token = request.headers["sec-websocket-protocol"];
+    console.log("wss auth", token);
+    const isVerify = verifyJWT(token);
+    // Extract token from request headers and verify
+    if (isVerify) {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit("connection", ws, request);
 
-// Endpoint to create a new clientId and JWT set
-app.post("/create-client", verifyJWT, (req, res) => {
-  const clientId = uuidv4(); // Generate a unique client ID
-
-  generateKeyPair(
-    "rsa",
-    {
-      modulusLength: 2048, // Standard RSA key size
-      publicKeyEncoding: {
-        type: "spki",
-        format: "pem",
-      },
-      privateKeyEncoding: {
-        type: "pkcs8",
-        format: "pem",
-      },
-    },
-    (err, publicKey, privateKey) => {
-      if (err) {
-        return res.status(500).send({ error: "Error generating key pair" });
-      }
-
-      // Store the keys in the keyStore
-      publicKeysDB[clientId] = publicKey;
-
-      const jwk = {
-        kty: "RSA",
-        e: "AQAB", // base64 encoded
-        use: "sig", // signature
-        kid: clientId, // Generate a unique identifier for the key
-        alg: "RS256",
-        n: publicKey.toString("base64"), // Convert the public key to base64 for the 'n' value
-      };
-
-      jwkSet.keys.push(jwk);
-
-      res.status(201).send({
-        message: "Client created successfully",
-        clientId,
-        privateKey,
+        // When a new WebSocket connection is established
+        clientConnections.set(isVerify.clientId, ws);
       });
+    } else {
+      socket.destroy(); // Close the connection if the token is invalid
     }
-  );
+  });
+  socket.on("ice-candidate", async (message) => {
+    const data = JSON.parse(message);
+
+    // Assume `data` contains `senderId` and `receiverId`
+    const { senderId, receiverId } = data;
+
+    // Check if the sender is allowed to connect with the receiver
+    const isAllowed = await isClientAllowed(senderId, receiverId);
+    if (!isAllowed) {
+      console.log(
+        `Connection from ${senderId} to ${receiverId} is not allowed.`
+      );
+      return;
+    }
+
+    // Find the WebSocket connection of the receiver
+    const receiverWs = clientConnections.get(receiverId);
+    if (receiverWs) {
+      // Relay the ICE candidate to the receiver
+      receiverWs.send(
+        JSON.stringify({ type: "ice-candidate", candidate: data.candidate })
+      );
+    }
+
+    // Handle other message types...
+  });
 });
 
-// Retrieve the jwk sets
-app.get("/jwks", (req, res) => {
-  res.status(200).json(jwkSet);
+app.post("/create-client", (req, res) => {
+  const name = req.body.name;
+  // Generate a new RSA key pair
+  const key = new NodeRSA({ b: 2048 });
+  const privateKey = key.exportKey("private");
+  const publicKey = key.exportKey("public");
+  console.log("Public", publicKey);
+  const clientId = key
+    .exportKey("components-public")
+    .n.toString("hex")
+    .substring(0, 32); // Generate a clientId
+
+  publicKeysDB[clientId] = publicKey;
+  // Insert the new client and public key into the database
+  res.json({ clientId, privateKey, publicKey }); // Send the private key back to the client
 });
 
-// Protected route
-app.get("/protected", verifyJWT, (req, res) => {
-  res.send("Access to protected data");
+app.post("/auth", (req, res) => {
+  const { clientId, signature } = req.body;
+  const publicKey = publicKeysDB[clientId];
+
+  if (!publicKey) return res.status(404).json({ error: "No such client" });
+
+  const dataString = JSON.stringify({ clientId });
+  if (verifySignature(dataString, signature, publicKey)) {
+    console.log("Signature verified");
+    const accessToken = jwt.sign({ clientId }, "JWT_SECRET", {
+      expiresIn: "15m",
+    });
+    console.log("accessToken ", accessToken);
+    const refreshToken = jwt.sign({ clientId }, "REFRESH_SECRET", {
+      expiresIn: "7d",
+    });
+    console.log("refreshToken ", refreshToken);
+
+    res.json({ accessToken, refreshToken });
+  } else {
+    res.status(401).json({ error: "Invalid signature" });
+  }
 });
 
-// Start the server
-const port = 3000;
-app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
+app.post("/refresh-token", (req, res) => {
+  const { refreshToken } = req.body;
+
+  // Verify the refresh token and issue a new access token
+  // Assuming a function 'verifyRefreshToken(refreshToken)' that returns clientId if valid
+
+  const clientId = verifyRefreshToken(refreshToken); // Replace with actual verification logic
+
+  if (clientId) {
+    const newAccessToken = jwt.sign({ clientId }, JWT_SECRET, {
+      expiresIn: "15m",
+    });
+    res.json({ accessToken: newAccessToken });
+  } else {
+    res.status(401).json({ message: "Invalid refresh token" });
+  }
+});
+
+io.on("connection", () => {
+  /* … */
 });
